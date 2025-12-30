@@ -1,24 +1,110 @@
 -- === CONFIGURASI ===
 local TARGET_FPS = 144
+local TARGET_PING = 20 -- Target ping dalam ms
+local RESCAN_INTERVAL = 3
 -- === END CONFIGURASI ===
 
 local Lighting = game:GetService("Lighting")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Stats = game:GetService("Stats")
 local LocalPlayer = Players.LocalPlayer
 
 print("🚀 Memulakan optimasi...")
 
---=== 0. CUBA AKTIFKAN VULKAN RENDERER (JIKA SUPPORTED) ===--
-pcall(function()
-    -- setfflag biasanya function dari exploit, sama macam setfpscap (BUKAN API rasmi Roblox)
-    if typeof(setfflag) == "function" then
-        -- Flag ini mungkin berubah ikut update Roblox; kalau tak wujud, dia cuma error dalam pcall (selamat)
-        setfflag("FFlagDebugGraphicsPreferVulkan", "true")
-        -- Kalau nak lebih agresif (optional, boleh buang line ni kalau takut crash)
-        -- setfflag("FFlagDebugGraphicsDisableDirect3D11", "true")
+local modifiedParts = {}
+local connections = {}
+local protectedObjects = {}
+
+--=== 0. FFLAGS UNTUK PERFORMANCE + LOW PING ===--
+local function applyFFlags()
+    if typeof(setfflag) ~= "function" then 
+        print("⚠️ setfflag tidak tersedia")
+        return false 
     end
-end)
-print("✅ Cuba aktifkan Vulkan renderer (jika disokong client)")
+    
+    local fflags = {
+        --=== RENDERER ===--
+        ["FFlagDebugGraphicsPreferVulkan"] = "true",
+        ["DFIntTaskSchedulerTargetFps"] = tostring(TARGET_FPS),
+        
+        --=== NETWORK - TARGET PING 20MS ===--
+        ["DFIntOptimizePingThreshold"] = tostring(TARGET_PING),
+        ["DFIntMinimalNetworkPingMilliseconds"] = "0",
+        ["DFIntConnectionMTUSize"] = "900",                    -- Smaller packet = faster
+        ["DFIntPlayerNetworkUpdateRate"] = "120",              -- Higher update rate
+        ["DFIntDataSenderRate"] = "120",                       -- Faster data send
+        ["DFIntNetworkLatencyTolerance"] = "1",                -- Low latency tolerance
+        ["DFIntReplicatorLagInterval"] = "0",                  -- No lag interval
+        ["DFIntMegaReplicatorNetSendInterval"] = "5",          -- Faster net send
+        ["DFIntReplicatorFastSendPriority"] = "2",             -- High priority send
+        ["DFIntNetworkSchemaCompressionRatio"] = "100",        -- Full compression
+        ["DFIntNetworkPrediction"] = "1",                      -- Enable prediction
+        ["FFlagNetworkOwnershipOptimization"] = "true",
+        ["FFlagNetworkClampDistance"] = "false",
+        ["DFIntClientNetworkBufferSize"] = "8",                -- Smaller buffer = less delay
+        ["DFIntHttpCurlConnectionCacheSize"] = "200",
+        ["DFIntHttpCurlConnectionPoolSize"] = "200",
+        ["DFIntTcpSendBufferSize"] = "8192",                   -- Optimized TCP buffer
+        ["DFIntTcpRecvBufferSize"] = "8192",
+        ["DFIntUdpSendBufferSize"] = "8192",                   -- Optimized UDP buffer
+        ["DFIntUdpRecvBufferSize"] = "8192",
+        ["FFlagEnableNetworkStatistics"] = "true",
+        ["DFIntServerPhysicsUpdateRate"] = "120",              -- Server update rate
+        ["DFIntNetworkPingTargetMs"] = tostring(TARGET_PING),  -- Target ping
+        ["DFIntRakNetResendBufferSize"] = "128",               -- Smaller resend buffer
+        ["DFIntRakNetResendDelayMs"] = "10",                   -- Fast resend
+        ["FFlagNetworkSendPriorityOptimization"] = "true",
+        ["DFIntPacketLossIgnoreThreshold"] = "1",
+        ["DFIntNetworkQueueSize"] = "64",                      -- Smaller queue
+        ["FFlagOptimizeNetwork"] = "true",
+        ["FFlagOptimizeNetworkRouting"] = "true",
+        ["FFlagNetworkFastPath"] = "true",
+        ["DFIntRakNetMaxConcurrentConnections"] = "10",
+        ["DFIntNetworkReceiveMaxPendingPackets"] = "100",
+        
+        --=== STREAMING & REPLICATION ===--
+        ["DFIntStreamingPreferredRadius"] = "256",
+        ["DFIntReplicatorBacklogThreshold"] = "50",
+        ["FFlagEnablePreferredPriorityStreaming"] = "true",
+        
+        --=== INPUT LAG REDUCTION ===--
+        ["DFIntMaxFrameBufferSize"] = "1",
+        ["FFlagEnableQuickGameLaunch"] = "true",
+        ["DFIntRenderingThrottleMs"] = "0",
+        ["FFlagDisableNewVSync"] = "true",
+        ["DFIntInputBufferSize"] = "1",
+        
+        --=== RENDERING OPTIMIZATION ===--
+        ["FFlagNewLightAttenuation"] = "true",
+        ["DFIntCSGLevelOfDetailSwitchingDistance"] = "0",
+        ["FFlagDisablePostFx"] = "true",
+        ["DFIntDebugFRMQualityLevelOverride"] = "1",
+        ["DFIntGrassMaxCount"] = "0",
+        ["FIntRenderShadowIntensity"] = "0",
+        ["FFlagFastGPULightCulling3"] = "true",
+        ["DFIntTextureCompositorActiveJobs"] = "0",
+        ["FFlagGlobalWindActivationThreshold"] = "9999",
+    }
+    
+    local applied = 0
+    local failed = 0
+    for flag, value in pairs(fflags) do
+        local success = pcall(function()
+            setfflag(flag, value)
+        end)
+        if success then 
+            applied = applied + 1 
+        else
+            failed = failed + 1
+        end
+    end
+    
+    print("✅ Applied " .. applied .. " FFlags | Failed: " .. failed)
+    return true
+end
+
+applyFFlags()
 
 --=== 1. UNLOCK FPS ===--
 pcall(function() setfpscap(TARGET_FPS) end)
@@ -35,15 +121,24 @@ print("✅ Shadows dibuang")
 --=== 3. HILANGKAN LIGHTING EFFECTS ===--
 pcall(function()
     for _, v in pairs(Lighting:GetChildren()) do
-        if v:IsA("PostEffect") or v:IsA("Atmosphere") then 
+        if v:IsA("PostEffect") or v:IsA("Atmosphere") or v:IsA("Sky") or v:IsA("Clouds") then 
             v.Enabled = false 
         end
     end
+end)
+
+Lighting.ChildAdded:Connect(function(v)
+    task.delay(0.1, function()
+        if v:IsA("PostEffect") or v:IsA("Atmosphere") then
+            pcall(function() v.Enabled = false end)
+        end
+    end)
 end)
 print("✅ Lighting effects dibuang")
 
 --=== FUNCTION: CHECK PLAYER PART ===--
 local function isPlayerPart(obj)
+    if not obj or not obj.Parent then return false end
     for _, player in pairs(Players:GetPlayers()) do
         if player.Character and obj:IsDescendantOf(player.Character) then
             return true
@@ -52,77 +147,235 @@ local function isPlayerPart(obj)
     return false
 end
 
---=== 4. TUKAR MATERIAL & BUANG TEXTURE ===--
-local function cleanPart(v)
-    -- SKIP player parts (elak bug)
+--=== FUNCTION: CHECK PROTECTED OBJECT ===--
+local function isProtectedObject(obj)
+    if not obj then return true end
+    if protectedObjects[obj] then return true end
+    
+    local name = obj.Name:lower()
+    local parentName = obj.Parent and obj.Parent.Name:lower() or ""
+    
+    local protectedNames = {
+        "ball", "bola", "soccer", "football", "soccerball", "footballball",
+        "matchball", "gameball", "playball", "kickball",
+        "projectile", "bullet", "throw", "kick", "shoot",
+        "tps", "goal", "net", "post", "crossbar",
+        "sphere", "orb", "round"
+    }
+    
+    for _, keyword in ipairs(protectedNames) do
+        if name:find(keyword) or parentName:find(keyword) then
+            protectedObjects[obj] = true
+            return true
+        end
+    end
+    
+    local current = obj.Parent
+    local depth = 0
+    while current and current ~= workspace and depth < 5 do
+        local currentName = current.Name:lower()
+        for _, keyword in ipairs(protectedNames) do
+            if currentName:find(keyword) then
+                protectedObjects[obj] = true
+                return true
+            end
+        end
+        current = current.Parent
+        depth = depth + 1
+    end
+    
+    if obj:IsA("BasePart") then
+        pcall(function()
+            if obj.Shape == Enum.PartType.Ball then
+                protectedObjects[obj] = true
+            end
+        end)
+        
+        if protectedObjects[obj] then return true end
+        
+        pcall(function()
+            local size = obj.Size
+            local isRound = math.abs(size.X - size.Y) < 0.5 and math.abs(size.Y - size.Z) < 0.5
+            local isSmall = size.X < 5 and size.Y < 5 and size.Z < 5
+            if isRound and isSmall then
+                protectedObjects[obj] = true
+            end
+        end)
+    end
+    
+    if obj:IsA("MeshPart") then
+        pcall(function()
+            local meshId = obj.MeshId:lower()
+            if meshId:find("sphere") or meshId:find("ball") then
+                protectedObjects[obj] = true
+            end
+        end)
+    end
+    
+    return protectedObjects[obj] or false
+end
+
+--=== FUNCTION: APPLY PLASTIC ===--
+local function applyPlastic(v)
+    if not v or not v.Parent then return end
     if isPlayerPart(v) then return end
+    if isProtectedObject(v) then return end
+    if modifiedParts[v] then return end
     
     pcall(function()
-        -- Tukar material ke Plastic
         if v:IsA("BasePart") and not v:IsA("Terrain") then
+            if isProtectedObject(v) then return end
+            
             v.Material = Enum.Material.Plastic
             v.CastShadow = false
             v.Reflectance = 0
+            
+            if not connections[v] then
+                connections[v] = v:GetPropertyChangedSignal("Material"):Connect(function()
+                    if v.Material ~= Enum.Material.Plastic and not isProtectedObject(v) then
+                        task.defer(function()
+                            pcall(function()
+                                v.Material = Enum.Material.Plastic
+                            end)
+                        end)
+                    end
+                end)
+            end
+            
+            modifiedParts[v] = true
         end
         
-        -- Buang MeshPart texture
-        if v:IsA("MeshPart") then
-            v.Material = Enum.Material.Plastic
+        if v:IsA("MeshPart") and not isProtectedObject(v) then
             v.TextureID = ""
         end
         
-        -- Buang Texture (DISABLE je, jangan destroy)
         if v:IsA("Texture") then
             v.Transparency = 1
         end
         
-        -- Buang Decal (DISABLE je, jangan destroy)
         if v:IsA("Decal") then
             v.Transparency = 1
         end
         
-        -- Buang SurfaceAppearance
-        if v:IsA("SurfaceAppearance") then
+        if v:IsA("SurfaceAppearance") and not isProtectedObject(v.Parent) then
             v.Parent = nil
         end
         
-        -- Buang Mesh texture
-        if v:IsA("SpecialMesh") or v:IsA("FileMesh") then
+        if (v:IsA("SpecialMesh") or v:IsA("FileMesh")) and not isProtectedObject(v.Parent) then
             v.TextureId = ""
         end
-    end)
-end
-
--- Apply ke semua objects
-task.spawn(function()
-    for i, v in pairs(workspace:GetDescendants()) do
-        cleanPart(v)
-        if i % 500 == 0 then task.wait() end -- Elak freeze
-    end
-    print("✅ Material ditukar & Textures dibuang")
-end)
-
--- Apply ke objects baru
-workspace.DescendantAdded:Connect(function(v)
-    task.delay(0.2, function()
-        cleanPart(v)
-    end)
-end)
-
---=== 5. HILANGKAN PARTICLES ===--
-pcall(function()
-    for _, v in pairs(workspace:GetDescendants()) do
-        if isPlayerPart(v) then continue end
         
         if v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Fire") 
         or v:IsA("Smoke") or v:IsA("Sparkles") or v:IsA("Beam") then
             v.Enabled = false
         end
+    end)
+end
+
+--=== FUNCTION: FORCE REAPPLY ===--
+local function forceReapply(v)
+    if not v or not v.Parent then return end
+    if isPlayerPart(v) then return end
+    if isProtectedObject(v) then return end
+    
+    pcall(function()
+        if v:IsA("BasePart") and not v:IsA("Terrain") then
+            if isProtectedObject(v) then return end
+            v.Material = Enum.Material.Plastic
+            v.CastShadow = false
+            v.Reflectance = 0
+        end
+        
+        if v:IsA("MeshPart") and not isProtectedObject(v) then
+            v.TextureID = ""
+        end
+        
+        if v:IsA("Texture") or v:IsA("Decal") then
+            v.Transparency = 1
+        end
+        
+        if v:IsA("SurfaceAppearance") and not isProtectedObject(v.Parent) then
+            v.Parent = nil
+        end
+        
+        if (v:IsA("SpecialMesh") or v:IsA("FileMesh")) and not isProtectedObject(v.Parent) then
+            v.TextureId = ""
+        end
+        
+        if v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Fire") 
+        or v:IsA("Smoke") or v:IsA("Sparkles") or v:IsA("Beam") then
+            v.Enabled = false
+        end
+    end)
+end
+
+--=== 4. SCAN & PROTECT BOLA ===--
+print("🔍 Scanning untuk bola/physics objects...")
+task.spawn(function()
+    local ballCount = 0
+    for _, v in pairs(workspace:GetDescendants()) do
+        if isProtectedObject(v) then
+            ballCount = ballCount + 1
+        end
+    end
+    print("⚽ Found " .. ballCount .. " protected objects")
+end)
+
+--=== 5. INITIAL SCAN ===--
+task.spawn(function()
+    task.wait(0.5)
+    
+    local descendants = workspace:GetDescendants()
+    for i, v in pairs(descendants) do
+        applyPlastic(v)
+        if i % 500 == 0 then task.wait() end
+    end
+    print("✅ Initial scan complete - " .. #descendants .. " objects")
+end)
+
+--=== 6. MONITOR NEW OBJECTS ===--
+workspace.DescendantAdded:Connect(function(v)
+    if isProtectedObject(v) then
+        return
+    end
+    
+    task.delay(0.2, function()
+        if not isProtectedObject(v) then
+            applyPlastic(v)
+        end
+    end)
+    
+    task.delay(1, function()
+        if not isProtectedObject(v) then
+            forceReapply(v)
+        end
+    end)
+end)
+print("✅ Monitoring new objects")
+
+--=== 7. PERIODIC RESCAN ===--
+task.spawn(function()
+    while task.wait(RESCAN_INTERVAL) do
+        local count = 0
+        for _, v in pairs(workspace:GetDescendants()) do
+            if v:IsA("BasePart") and not v:IsA("Terrain") then
+                if not isPlayerPart(v) and not isProtectedObject(v) then
+                    if v.Material ~= Enum.Material.Plastic then
+                        forceReapply(v)
+                        count = count + 1
+                    end
+                end
+            end
+        end
+        
+        if count > 0 then
+            print("🔄 Reapplied plastic ke " .. count .. " parts")
+        end
     end
 end)
-print("✅ Particles dibuang")
+print("✅ Periodic rescan setiap " .. RESCAN_INTERVAL .. "s")
 
---=== 6. OPTIMASI TERRAIN ===--
+--=== 8. OPTIMASI TERRAIN ===--
 pcall(function()
     local terrain = workspace:FindFirstChildOfClass("Terrain")
     if terrain then
@@ -134,4 +387,39 @@ pcall(function()
 end)
 print("✅ Terrain optimized")
 
-print("✅ Semua siap! FPS boost aktif")
+--=== 9. CLEANUP DEAD CONNECTIONS ===--
+task.spawn(function()
+    while task.wait(30) do
+        for obj, conn in pairs(connections) do
+            if typeof(obj) == "Instance" and not obj.Parent then
+                pcall(function() conn:Disconnect() end)
+                connections[obj] = nil
+                modifiedParts[obj] = nil
+            end
+        end
+    end
+end)
+
+--=== 10. PING MONITOR ===--
+task.spawn(function()
+    while task.wait(5) do
+        pcall(function()
+            local ping = Stats.Network.ServerStatsItem["Data Ping"]:GetValueString()
+            local pingNum = tonumber(ping:match("%d+")) or 0
+            
+            local status = "🟢"
+            if pingNum > 50 then status = "🟡"
+            elseif pingNum > 100 then status = "🔴" end
+            
+            print(status .. " Ping: " .. ping .. " | Target: " .. TARGET_PING .. "ms")
+        end)
+    end
+end)
+
+print("═══════════════════════════════════════════════════")
+print("✅ FPS BOOST + LOW PING OPTIMIZATION AKTIF")
+print("═══════════════════════════════════════════════════")
+print("🎯 Target FPS: " .. TARGET_FPS)
+print("📡 Target Ping: " .. TARGET_PING .. "ms")
+print("⚽ Bola: PROTECTED")
+print("═══════════════════════════════════════════════════")
