@@ -8,6 +8,18 @@ local LocalPlayer = Players.LocalPlayer
 
 print("🚀 Memulakan optimasi...")
 
+--=== 0. CUBA AKTIFKAN VULKAN RENDERER (JIKA SUPPORTED) ===--
+pcall(function()
+    -- setfflag biasanya function dari exploit, sama macam setfpscap (BUKAN API rasmi Roblox)
+    if typeof(setfflag) == "function" then
+        -- Flag ini mungkin berubah ikut update Roblox; kalau tak wujud, dia cuma error dalam pcall (selamat)
+        setfflag("FFlagDebugGraphicsPreferVulkan", "true")
+        -- Kalau nak lebih agresif (optional, boleh buang line ni kalau takut crash)
+        -- setfflag("FFlagDebugGraphicsDisableDirect3D11", "true")
+    end
+end)
+print("✅ Cuba aktifkan Vulkan renderer (jika disokong client)")
+
 --=== 1. UNLOCK FPS ===--
 pcall(function() setfpscap(TARGET_FPS) end)
 print("✅ FPS Cap: " .. TARGET_FPS)
@@ -83,9 +95,9 @@ end
 
 -- Apply ke semua objects
 task.spawn(function()
-    for _, v in pairs(workspace:GetDescendants()) do
+    for i, v in pairs(workspace:GetDescendants()) do
         cleanPart(v)
-        if _ % 500 == 0 then task.wait() end -- Elak freeze
+        if i % 500 == 0 then task.wait() end -- Elak freeze
     end
     print("✅ Material ditukar & Textures dibuang")
 end)
