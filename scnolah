@@ -1,0 +1,125 @@
+-- === CONFIGURASI ===
+local TARGET_FPS = 144
+-- === END CONFIGURASI ===
+
+local Lighting = game:GetService("Lighting")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+print("🚀 Memulakan optimasi...")
+
+--=== 1. UNLOCK FPS ===--
+pcall(function() setfpscap(TARGET_FPS) end)
+print("✅ FPS Cap: " .. TARGET_FPS)
+
+--=== 2. HILANGKAN SHADOWS ===--
+pcall(function()
+    Lighting.GlobalShadows = false
+    Lighting.FogEnd = 100000
+    Lighting.Brightness = 2
+end)
+print("✅ Shadows dibuang")
+
+--=== 3. HILANGKAN LIGHTING EFFECTS ===--
+pcall(function()
+    for _, v in pairs(Lighting:GetChildren()) do
+        if v:IsA("PostEffect") or v:IsA("Atmosphere") then 
+            v.Enabled = false 
+        end
+    end
+end)
+print("✅ Lighting effects dibuang")
+
+--=== FUNCTION: CHECK PLAYER PART ===--
+local function isPlayerPart(obj)
+    for _, player in pairs(Players:GetPlayers()) do
+        if player.Character and obj:IsDescendantOf(player.Character) then
+            return true
+        end
+    end
+    return false
+end
+
+--=== 4. TUKAR MATERIAL & BUANG TEXTURE ===--
+local function cleanPart(v)
+    -- SKIP player parts (elak bug)
+    if isPlayerPart(v) then return end
+    
+    pcall(function()
+        -- Tukar material ke Plastic
+        if v:IsA("BasePart") and not v:IsA("Terrain") then
+            v.Material = Enum.Material.Plastic
+            v.CastShadow = false
+            v.Reflectance = 0
+        end
+        
+        -- Buang MeshPart texture
+        if v:IsA("MeshPart") then
+            v.Material = Enum.Material.Plastic
+            v.TextureID = ""
+        end
+        
+        -- Buang Texture (DISABLE je, jangan destroy)
+        if v:IsA("Texture") then
+            v.Transparency = 1
+        end
+        
+        -- Buang Decal (DISABLE je, jangan destroy)
+        if v:IsA("Decal") then
+            v.Transparency = 1
+        end
+        
+        -- Buang SurfaceAppearance
+        if v:IsA("SurfaceAppearance") then
+            v.Parent = nil
+        end
+        
+        -- Buang Mesh texture
+        if v:IsA("SpecialMesh") or v:IsA("FileMesh") then
+            v.TextureId = ""
+        end
+    end)
+end
+
+-- Apply ke semua objects
+task.spawn(function()
+    for _, v in pairs(workspace:GetDescendants()) do
+        cleanPart(v)
+        if _ % 500 == 0 then task.wait() end -- Elak freeze
+    end
+    print("✅ Material ditukar & Textures dibuang")
+end)
+
+-- Apply ke objects baru
+workspace.DescendantAdded:Connect(function(v)
+    task.delay(0.2, function()
+        cleanPart(v)
+    end)
+end)
+
+--=== 5. HILANGKAN PARTICLES ===--
+pcall(function()
+    for _, v in pairs(workspace:GetDescendants()) do
+        if isPlayerPart(v) then continue end
+        
+        if v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Fire") 
+        or v:IsA("Smoke") or v:IsA("Sparkles") or v:IsA("Beam") then
+            v.Enabled = false
+        end
+    end
+end)
+print("✅ Particles dibuang")
+
+--=== 6. OPTIMASI TERRAIN ===--
+pcall(function()
+    local terrain = workspace:FindFirstChildOfClass("Terrain")
+    if terrain then
+        terrain.WaterWaveSize = 0
+        terrain.WaterWaveSpeed = 0
+        terrain.WaterReflectance = 0
+        terrain.Decoration = false
+    end
+end)
+print("✅ Terrain optimized")
+
+print("✅ Semua siap! FPS boost aktif")
