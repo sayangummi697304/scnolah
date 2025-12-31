@@ -1,0 +1,1 @@
+First time using GitHub, I didn't know what to write here, but I want you to know that I am currently developing a Lua script for Roblox to optimize performance in the TPS Street Soccer game with AI hoho.
