@@ -494,7 +494,7 @@ end
 
 --=== FINAL OUTPUT ===--
 print("═══════════════════════════════════════════════════")
-print("✅ FULL AUTO MODE AKTIF!")
+print("✅ FULL AUTO MODE ACTIVE!")
 print("═══════════════════════════════════════════════════")
 print("🎯 FPS: " .. CONFIG.TARGET_FPS)
 print("📶 Ping Optimizer: " .. (CONFIG.FORCE_PING.ENABLED and "ON" or "OFF"))
